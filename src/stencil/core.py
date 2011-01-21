@@ -1,8 +1,8 @@
 
-from collections import Callable
-
 from zope.interface import implements
 from zope.component import provideAdapter
+
+from collections import Callable
 
 from stencil import interfaces
 
@@ -18,26 +18,21 @@ class ValueNotFound(Exception):
 class Field(object):
     implements(interfaces.IField)
 
-    def __init__(self, name, length):
+    def __init__(self, name, format):
         self.name = name
-        self.length = interfaces.IFieldLength(length)
+        self.format = interfaces.IFormat(format)
 
-    def read(self, stream, context):
-        length = self.length.evaluate(context)
-        return self.decode(context, stream.read(length))
+    def get_value(self, context):
+        try:
+            return context[self.name]
+        except KeyError:
+            raise ValueNotFound(self.name)
 
-    def decode(self, context, value):
-        pass
+    def set_value(self, context, value):
+        context[self.name] = value
 
-    def write(self, stream, argument, context):
-        length = self.length.evaluate(context)
-        stream.write(self.encode(context, length, argument))
-
-    def encode(self, context, length, value):
-        pass
-
-class StaticFieldLength(object):
-    implements(interfaces.IFieldLength)
+class StaticFormatLength(object):
+    implements(interfaces.IFormatLength)
 
     def __init__(self, length):
         self.value = length
@@ -45,11 +40,12 @@ class StaticFieldLength(object):
     def evaluate(self, context):
         return self.value
 
-provideAdapter(StaticFieldLength, [int], interfaces.IFieldLength)
-provideAdapter(StaticFieldLength, [long], interfaces.IFieldLength)
+provideAdapter(StaticFormatLength, [int], interfaces.IFormatLength)
+provideAdapter(StaticFormatLength, [long], interfaces.IFormatLength)
+provideAdapter(StaticFormatLength, [None], interfaces.IFormatLength)
 
-class CallableFieldLength(object):
-    implements(interfaces.IFieldLength)
+class CallableFormatLength(object):
+    implements(interfaces.IFormatLength)
     
     def __init__(self, func):
         self.func = func
@@ -57,10 +53,10 @@ class CallableFieldLength(object):
     def evaluate(self, context):
         return self.func(context)
 
-provideAdapter(CallableFieldLength, [Callable], interfaces.IFieldLength)
+provideAdapter(CallableFormatLength, [Callable], interfaces.IFormatLength)
 
-class ContextFieldLength(object):
-    implements(interfaces.IFieldLength)
+class ContextFormatLength(object):
+    implements(interfaces.IFormatLength)
 
     def __init__(self, name):
         self.name = name
@@ -68,10 +64,35 @@ class ContextFieldLength(object):
     def evaluate(self, context):
         return context[self.name]
 
-provideAdapter(ContextFieldLength, [str], interfaces.IFieldLength)
+provideAdapter(ContextFormatLength, [str], interfaces.IFormatLength)
 
-class SumFieldLength(object):
-    implements(interfaces.IFieldLength)
+class StructBase(object):
+    implements(interfaces.IFormat)
+
+    def create_fields(self, context):
+        pass
+
+    def read(self, stream, context=None):
+        context = context or dict()
+        for field in self.create_fields(context):
+            field = interfaces.IField(field)
+            value = field.format.read(stream, context)
+            field.set_value(context, value)
+        return context
+
+    def write(self, stream, values, context=None):
+        if context:
+            context = dict(context)
+        else:
+            context = dict()
+        context.update(values)
+        for field in self.create_fields(context):
+            field = interfaces.IField(field)
+            value = field.get_value(context)
+            field.format.write(stream, value, context)
+
+class StructFieldLength(object):
+    implements(interfaces.IFormatLength)
 
     def __init__(self, fields):
         self.fields = fields
@@ -79,27 +100,14 @@ class SumFieldLength(object):
     def evaluate(self, context):
         return sum(field.length.evaluate(context) for field in self.fields)
 
-class Struct(Field):
+class Struct(StructBase):
     """
     A struct contains an ordered list of fields that use field
-    names for easy identification, like a C struct.
+    names for identification, like a C struct.
     """
-    def __init__(self, name, fields=None):
-        Field.__init__(self, name, SumFieldLength(fields))
+    def __init__(self, fields=None):
         self.fields = fields or []
+        self.length = StructFieldLength(self.fields)
 
-    def read(self, stream, context):
-        struct = {}
-        for field in self.fields:
-            value = field.read(stream, context)
-            struct[field.name] = value
-        return struct
-
-    def write(self, stream, struct, context):
-        for field in self.fields:
-            if field.name in struct:
-                field.write(stream, struct[field.name], context)
-            elif field.name in context:
-                field.write(stream, context[field.name], context)
-            else:
-                raise ValueNotFound(field.name)
+    def create_fields(self, context):
+        return iter(self.fields)

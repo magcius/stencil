@@ -1,37 +1,41 @@
 
 from io import BytesIO
 
-from stencil.core import Struct
-from stencil.primitives import ByteString
+from stencil.core import Struct, Field
+from stencil.primitives import UInt, SInt
 
-def test_ByteString_write():
+BasicXY = Struct([Field("X", SInt(2)),
+                  Field("Y", SInt(2))])
+
+def test_BasicXY_write():
     stream = BytesIO()
-    field = ByteString("a", 5)
     context = {}
-    field.write(stream, "12345", context)
+    values = dict(X=-24, Y=73)
+    XY.write(stream, values, context)
+    assert stream.getvalue() == "\xE8\xFF\x49\x00"
 
-    assert stream.getvalue() == b"12345"
-
-def test_ByteString_read():
-    stream = BytesIO("12345")
-    field = ByteString("a", 5)
+def test_BasicXY_read():
+    stream = BytesIO("\xE8\xFF\x49\x00")
     context = {}
-    value = field.read(stream, context)
-    assert value == "12345"
+    values = XY.read(stream, context)
+    assert values['X'] == -24
+    assert values['Y'] == 73
 
-def test_Struct_write():
+
+XY = Struct([Field("NBytes", UInt(2)),
+             Field("X", SInt("NBytes")),
+             Field("Y", SInt("NBytes"))])
+
+def test_XY_write():
     stream = BytesIO()
-    struct = Struct("struct", [ByteString(name, 3) for name in ("a", "b", "c")])
     context = {}
-    values = dict(a="fgh", b="ijk", c="lmn")
-    struct.write(stream, values, context)
-    assert stream.getvalue() == "fghijklmn"
+    values = dict(X=-24, Y=73)
+    XY.write(stream, values, context)
+    assert stream.getvalue() == "\x02\x00\xE8\xFF\x49\x00"
 
-def test_Struct_read():
-    stream = BytesIO("fghijklmn")
-    struct = Struct("struct", [ByteString(name, 3) for name in ("a", "b", "c")])
+def test_XY_read():
+    stream = BytesIO("\x02\x00\xE8\xFF\x49\x00")
     context = {}
-    values = struct.read(stream, context)
-    assert values["a"] == "fgh"
-    assert values["b"] == "ijk"
-    assert values["c"] == "lmn"
+    values = XY.read(stream, context)
+    assert values['X'] == -24
+    assert values['Y'] == 73
